@@ -1,0 +1,13 @@
+albumentations
+evaluate
+matplotlib
+numpy
+opencv-python
+pandas
+scikit-learn
+seaborn
+torch
+torchvision
+tqdm
+git+https://github.com/George-Ogden/utils/
+wandb
