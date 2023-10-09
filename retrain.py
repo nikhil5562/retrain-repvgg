@@ -174,20 +174,23 @@ if __name__ == "__main__":
 
     # load pretrained model
     # pretrained weights are available at https://drive.google.com/drive/folders/1Avome4KvNp0Lqh2QwhXO6L5URQjzCjUq and saved in pretrained/
-    model.load_state_dict(torch.load(f"pretrained/{model_name}-train.pth"), strict=False)
+
+    state_dict = torch.load(f"pretrained/{model_name}-train.pth")
+    # classifies 1000 features by default
+    # use only 8
+    num_classes = len(idx_to_label)
+    model.linear.out_features = num_classes
+    with torch.no_grad():
+        state_dict["linear.weight"] = state_dict["linear.weight"][:len(idx_to_label),:]
+        state_dict["linear.bias"] = state_dict["linear.bias"][:len(idx_to_label)]
+
+    model.load_state_dict(state_dict, strict=False)
 
     # Check and print which layers are frozen
     for name, param in model.named_parameters():
         if not param.requires_grad:
             print(f"Layer '{name}' is frozen.")        
 
-    # classifies 1000 features by default
-    # use only 8
-    num_classes = len(idx_to_label)
-    model.linear.out_features = num_classes
-    with torch.no_grad():
-        model.linear._parameters["weight"] = model.linear._parameters["weight"][:num_classes,:]
-        model.linear._parameters["bias"] = model.linear._parameters["bias"][:num_classes]
 
     # set up trainer
     trainer = Trainer(
