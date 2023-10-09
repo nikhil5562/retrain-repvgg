@@ -50,7 +50,7 @@ else:
 df = pd.read_csv(csv_file)
 
 # Replace forward slashes with backslashes in the 'pth' column
-df['pth'] = df['pth'].str.replace('/', '\\')
+df['pth'] = df['pth'].str.replace('\\', '/')
 
 # Define the destination folder path
 destination_folder = "C:\\Users\\nikhi\\Desktop\\emotion-research-master\\data"
