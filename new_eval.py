@@ -14,12 +14,12 @@ from tqdm import tqdm
 
 from ml_utils import Config, ParserBuilder
 from dataclasses import dataclass, field
-from typing import Dict, List  # Import List from typing
+from typing import Dict, List
 import sys
 import os
 
 sys.path.append(os.path.join(os.getcwd(), "repvgg"))
-from repvgg import get_RepVGG_func_by_name
+from repvgg import get_RepVGG_func_by_name, repvgg_model_convert
 
 @dataclass
 class EvaluationConfig(Config):
@@ -27,6 +27,8 @@ class EvaluationConfig(Config):
     """RepVGG model to use"""
     batch_size: int = 64
     """Batch size to use for evaluating."""
+    save_directory: str = "checkpoints"
+    """Directory to load checkpoints from."""
     additional_metrics: List[str] = field(default_factory=lambda: ["accuracy"])
     """Additional metrics to compute."""
     @property
@@ -37,66 +39,86 @@ class EvaluationConfig(Config):
         ]
 
 class Evaluator:
-    def __init__(
-        self,
-        model: nn.Module,
-        config: EvaluationConfig=EvaluationConfig()
-    ):
+    def __init__(self, model: nn.Module, config: EvaluationConfig = EvaluationConfig()):
         # setup device
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        # setup model
-        self.model = model.to(self.device)
-        
-        # setup training config
-        self.config = config
+        # Load the model with the correct architecture
+        model_name = config.model
+        create_RepVGG_func = get_RepVGG_func_by_name(model_name)
+        self.model = create_RepVGG_func(deploy=False)
+
+        # Load pretrained weights
+        state_dict = torch.load(f"pretrained/{model_name}-train.pth")
+        num_classes = len(idx_to_label)
+        self.model.linear.out_features = num_classes
+        with torch.no_grad():
+            state_dict["linear.weight"] = state_dict["linear.weight"][:len(idx_to_label), :]
+            state_dict["linear.bias"] = state_dict["linear.bias"][:len(idx_to_label)]
+        self.model.load_state_dict(state_dict, strict=False)
+
+        # Setup the save directory
+        self.save_directory = config.save_directory
     
-    @torch.no_grad()
-    def evaluate(self, dataset: FaceDataset) -> Dict[str, float]:
-        # set up dataloaders
+        # Setup training config
+        self.config = config
+
+        self.criterion = nn.CrossEntropyLoss()
+
+    def _compute_loss(self, batch: torch.Tensor) -> torch.Tensor:
+        images, labels = batch
+        images = images.to(self.device)
+        labels = labels.to(self.device)
+
+        # Forward pass
+        outputs = self.model(images)
+        loss = self.criterion(outputs, labels)
+        return loss
+
+    def evaluate(self, dataset: FaceDataset):
+        # Set up dataloaders
         test_loader = data.DataLoader(
             dataset,
-            batch_size=self.config.batch_size,
-            shuffle=False,
-            num_workers=8
+            batch_size = self.config.batch_size,
+            shuffle = False,
+            num_workers = 8
         )
         self.model.eval()
 
-        # evaluate
         predictions, targets = zip(
             *[
                 (
                     self.model(
                         images.to(self.device)
-                    ).argmax(dim=-1).cpu(),
+                    ).argmax(dim = -1).cpu(),
                     labels
                 )
-                for images, labels in tqdm(test_loader, desc="Evaluating")
+                for images, labels in tqdm(test_loader, desc = "Evaluating")
             ]
         )
         targets = torch.cat(targets).numpy()
         predictions = torch.cat(predictions).numpy()
 
-        # compute metrics
+        # Compute metrics
         calculated_metrics = {}
         for metric in self.config.metrics:
-            calculated_metrics |= metric.compute(references=targets, predictions=predictions)
+            calculated_metrics |= metric.compute(references = targets, predictions = predictions)
 
-        # calculate confusion matrix
+        # Calculate confusion matrix
         confusion_matrix = metrics.confusion_matrix(
             targets,
             predictions,
-            normalize="true"
+            normalize = "true"
         )
-        df_cm = pd.DataFrame(confusion_matrix, index=idx_to_label, columns=idx_to_label)
+        df_cm = pd.DataFrame(confusion_matrix, index = idx_to_label, columns = idx_to_label)
         print(df_cm)
         
-        # plot confusion matrix
+        # Plot confusion matrix
         ax = plt.axes()
         sns.heatmap(
             df_cm,
-            annot=True,
-            ax=ax
+            annot = True,
+            ax = ax
         )
         ax.set_xlabel("True")
         ax.set_ylabel("Predicted")
@@ -109,29 +131,20 @@ class Evaluator:
 
 if __name__ == "__main__":
     parser = ParserBuilder().add_dataclass(
-        EvaluationConfig(),
+        EvaluationConfig()
     ).build()
     args = parser.parse_args()
     config = EvaluationConfig.from_args(args)
     
-    # Initialize RepVGG model (load deployable model)
+    # Create an Evaluator and perform the evaluation
     model_name = config.model
     create_RepVGG_func = get_RepVGG_func_by_name(model_name)
-    model = create_RepVGG_func(deploy=True)
-
-    # classifies 1000 features by default, use only 8
-    num_classes = len(idx_to_label)
-    model.linear.out_features = num_classes
-    with torch.no_grad():
-        model.linear._parameters["weight"] = model.linear._parameters["weight"][:num_classes,:]
-        model.linear._parameters["bias"] = model.linear._parameters["bias"][:num_classes]
-
-    # set up evaluator
+    model = create_RepVGG_func(deploy = False)
     evaluator = Evaluator(
         model,
-        config=config,
+        config = config
     )
 
-    # evaluate
-    test_dataset = FaceDataset("data", split="test", augment=False)
+    # Evaluate
+    test_dataset = FaceDataset("data", split = "test", augment = False)
     print(evaluator.evaluate(test_dataset))
