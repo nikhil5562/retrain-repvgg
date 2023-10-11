@@ -28,7 +28,8 @@ class FaceDataset(Dataset):
         self.df = pd.read_csv(os.path.join(self.root, f"{split}.csv"))
         self.transforms = ImageClassification(
             crop_size=256,
-            resize_size=224
+            resize_size=224,
+            antialias=True
         ) if transforms is None else transforms
         self._augment = A.Compose(
             [
