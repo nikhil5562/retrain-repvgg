@@ -84,6 +84,7 @@ class Evaluator:
             num_workers = 8
         )
         self.model.eval()
+        self.model.to(self.device)
 
         predictions, targets = zip(
             *[
